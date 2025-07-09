@@ -1,45 +1,62 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, BrowserView, ipcMain } = require('electron');
 const path = require('node:path');
 
-const PARTITION = 'persist:main';
-const H = 800, W = 1280;
+const PARTITION = 'persist:main';           // shared session survives restarts
+let win, views = [], active = 0;
 
-let win;
-let currentTabId = 1;
-let tabs = new Map();
-
+/* ───────── create window + first tab ───────── */
 app.whenReady().then(() => {
     win = new BrowserWindow({
-        width: W, height: H,
-        show: true,
+        width: 1280, height: 800,
         webPreferences: {
-            partition: PARTITION,
-            nodeIntegration: true,
-            contextIsolation: false,
-            webviewTag: true
+            preload: path.join(__dirname, 'preload.js')
         }
     });
-
-    // Load our custom browser interface
-    win.loadFile(path.join(__dirname, 'browser.html'));
-
-    // Handle IPC messages from the renderer
-    ipcMain.handle('create-tab', async () => {
-        currentTabId++;
-        return currentTabId;
-    });
-
-    ipcMain.handle('close-tab', async (event, tabId) => {
-        tabs.delete(tabId);
-        return Array.from(tabs.keys());
-    });
-
-    // Optional: Set frame rate for performance
-    win.webContents.setFrameRate(60);
+    win.loadFile(path.join(__dirname, 'renderer.html'));
+    addTab('https://www.google.com');         // first real web page
+    win.on('resize', layoutViews);
 });
 
-/* ---------- quit housekeeping (flush IndexedDB etc.) ------------ */
-app.on('before-quit', async () => {
-    const ses = win?.webContents.session;
-    if (ses) await ses.flushStorageData();
+/* ───────── tab helpers ───────── */
+function addTab(url) {
+    const view = new BrowserView({
+        webPreferences: { partition: PARTITION }
+    });
+    views.push(view);
+    active = views.length - 1;
+    win.setBrowserView(view);
+    layoutViews();
+    view.webContents.loadURL(url);
+}
+
+function layoutViews() {
+    const [w, h] = win.getContentSize();
+    // Reserve 48 px for tabstrip + omnibox
+    views.forEach(v => v.setBounds({ x: 0, y: 48, width: w, height: h - 48 }));
+}
+
+/* ───────── IPC handlers ───────── */
+ipcMain.handle('tabs:new', () => addTab('https://google.com'));
+
+ipcMain.handle('tabs:activate', (_e, idx) => {
+    if (!views[idx]) return;
+    active = idx;
+    win.setBrowserView(views[idx]);
+    layoutViews();
+});
+
+ipcMain.handle('tabs:close', (_e, idx) => {
+    if (views.length === 1) return;           // keep at least one tab open
+    views[idx].destroy();
+    views.splice(idx, 1);
+    active = Math.max(0, active - (idx <= active ? 1 : 0));
+    win.setBrowserView(views[active]);
+    layoutViews();
+});
+
+ipcMain.handle('omnibox:navigate', (_e, raw) => {
+    const url = /^(https?:\/\/|file:)/i.test(raw)
+        ? raw
+        : `https://www.google.com/search?q=${encodeURIComponent(raw)}`;
+    views[active].webContents.loadURL(url);
 });
