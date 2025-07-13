@@ -1,0 +1,43 @@
+body {
+    margin: 0;
+    font: 14px sans-serif;
+}
+
+#chrome {
+    height: 48px;
+    background: #f3f3f3;
+    display: flex;
+    align-items: center;
+}
+
+#tabbar {
+    flex: 1;
+}
+
+.tab {
+    margin: 4px 2px;
+    padding: 4px 8px;
+    border: none;
+    background: #ddd;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+#omnibox {
+    width: 400px;
+    margin-right: 16px;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 6px;
+    border: 1px solid #bbb;
+}
+
+#new-tab-button {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: none;
+    background: #ccc;
+    margin-right: 8px;
+    cursor: pointer;
+}
