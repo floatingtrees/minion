@@ -69,7 +69,12 @@ app.whenReady().then(() => {
     createAppMenu();
 
     win.loadFile(path.join(__dirname, 'renderer.html'));
-    addTab('https://www.google.com', true);         // first real web page
+
+    // Wait for renderer to be ready, then add the initial tab
+    win.webContents.once('did-finish-load', () => {
+        addTab('https://www.google.com', true);  // notify renderer about initial tab
+    });
+
     win.on('resize', layoutViews);
 });
 
@@ -89,11 +94,15 @@ function addTab(url, notifyRenderer = false) {
         win.webContents.send('tab:title', tabIndex, title);
     });
 
-    // Listen for page load completion to get initial title
+    // Listen for page load completion to get initial title and URL
     view.webContents.on('did-finish-load', () => {
         const title = view.webContents.getTitle();
+        const url = view.webContents.getURL();
         if (title && title !== '') {
             win.webContents.send('tab:title', tabIndex, title);
+        }
+        if (url && url !== '') {
+            win.webContents.send('tab:url', tabIndex, url);
         }
     });
 
@@ -128,7 +137,7 @@ function addTab(url, notifyRenderer = false) {
     view.webContents.loadURL(url);
 
     if (notifyRenderer) {
-        win.webContents.send('tab-created', { id: view.webContents.id });
+        win.webContents.send('tab-created', { id: view.webContents.id, url: url });
     }
 }
 
@@ -187,7 +196,7 @@ function layoutViews() {
 
 /* ───────── IPC handlers ───────── */
 ipcMain.handle('tabs:new', (_e, idx) => {
-    addTab('https://www.google.com', true)
+    addTab('https://www.google.com', true);
 });
 
 ipcMain.handle('tabs:activate', (_e, idx) => {
@@ -201,9 +210,24 @@ ipcMain.handle('tabs:close', (_e, idx) => {
 });
 
 ipcMain.handle('omnibox:navigate', (_e, raw) => {
-    const url = /^(https?:\/\/|file:)/i.test(raw)
-        ? raw
-        : `https://www.google.com/search?q=${encodeURIComponent(raw)}`;
+    let url;
+    const input = raw.trim();
+
+    // Check if it's a URL (improved detection)
+    if (/^https?:\/\//i.test(input)) {
+        // Already has protocol
+        url = input;
+    } else if (/^[a-zA-Z0-9-]+\.[a-zA-Z]{2,}/i.test(input)) {
+        // Looks like a domain (e.g., "google.com", "example.org")
+        url = `https://${input}`;
+    } else if (/^localhost(:\d+)?/i.test(input)) {
+        // Localhost with optional port
+        url = `http://${input}`;
+    } else {
+        // Search query
+        url = `https://www.google.com/search?q=${encodeURIComponent(input)}`;
+    }
+
     views[active].webContents.loadURL(url);
 
     // Set a temporary title while loading

@@ -1,5 +1,5 @@
 const api = window.browserAPI;
-const tabs = [];                        // store {id, title} for each tab
+const tabs = [];                        // store {id, title, url} for each tab
 let activeTabIdx = 0;                   // track the currently active tab
 const bar = document.getElementById('tabbar');
 const omni = document.getElementById('omnibox');
@@ -26,22 +26,19 @@ function redraw() {
     const newTabButton = bar.querySelector('#new-tab-button');
     bar.innerHTML = tabsHTML;
     bar.appendChild(newTabButton);
+
+    // Update omnibox to show current tab's URL
+    updateOmnibox();
 }
 
-async function closeTab(idx) {
-    if (tabs.length === 1) return;
-    api.closeTab(idx);
-    tabs.splice(idx, 1);
-
-    if (idx < activeTabIdx) {
-        activeTabIdx--;
-    } else if (activeTabIdx >= tabs.length) {
-        activeTabIdx = tabs.length - 1;
+function updateOmnibox() {
+    if (tabs[activeTabIdx]) {
+        omni.value = tabs[activeTabIdx].url || '';
     }
-
-    api.activateTab(activeTabIdx);
-    redraw();
 }
+
+// Tab closing is handled by main process via IPC events
+// The renderer just needs to respond to tab-closed events
 
 /* ───────── events ───────── */
 bar.addEventListener('click', e => {
@@ -52,7 +49,7 @@ bar.addEventListener('click', e => {
     const id = +tabButton.dataset.id;
 
     if (e.target.classList.contains('close-x')) {
-        api.closeTab(id);
+        api.closeTab(i);  // Pass index, not ID
     } else { // Click was on the tab button itself
         api.activateTab(i);
     }
@@ -90,7 +87,25 @@ sidebarBtn.addEventListener('click', () => {
 });
 
 omni.addEventListener('keydown', e => {
-    if (e.key === 'Enter') api.navigate(e.target.value);
+    if (e.key === 'Enter') {
+        const input = e.target.value.trim();
+        if (tabs[activeTabIdx]) {
+            tabs[activeTabIdx].url = input;
+        }
+        api.navigate(input);
+    }
+});
+
+// Update current tab's URL when user types in omnibox
+omni.addEventListener('input', e => {
+    if (tabs[activeTabIdx]) {
+        tabs[activeTabIdx].url = e.target.value;
+    }
+});
+
+// Select all text when omnibox is focused
+omni.addEventListener('focus', () => {
+    omni.select();
 });
 
 document.addEventListener('keydown', e => {
@@ -104,6 +119,19 @@ document.addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'ArrowRight') {
         e.preventDefault();
         api.goForward();
+    }
+
+    // CMD+L or CTRL+L to focus omnibox
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        omni.focus();
+        omni.select();
+    }
+
+    // CMD+T or CTRL+T to create new tab
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        api.newTab();
     }
 });
 
@@ -129,10 +157,25 @@ api.onTitle((idx, title) => {
     redraw();
 });
 
+// Listen for URL changes to update the omnibox
+api.onUrlChange((idx, url) => {
+    if (tabs[idx]) {
+        tabs[idx].url = url;
+        // Update omnibox if this is the active tab
+        if (idx === activeTabIdx) {
+            omni.value = url;
+        }
+    }
+});
+
 api.onTabCreated((tabData) => {
-    tabs.push({ id: tabData.id, title: 'New Tab' });
+    tabs.push({ id: tabData.id, title: 'New Tab', url: tabData.url || '' });
     activeTabIdx = tabs.length - 1;
     redraw();
+
+    // Focus and select all text in omnibox for new tab
+    omni.focus();
+    omni.select();
 });
 
 api.onTabClosed(({ closedTabIndex, newActiveTabIndex }) => {

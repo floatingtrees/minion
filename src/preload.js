@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('browserAPI', {
     takeScreenshot: () => ipcRenderer.invoke('page:screenshot'),
     toggleSidebar: (isVisible) => ipcRenderer.send('sidebar:toggle', isVisible),
     onTitle: fn => ipcRenderer.on('tab:title', (_, ...args) => fn(...args)),
+    onUrlChange: fn => ipcRenderer.on('tab:url', (_, ...args) => fn(...args)),
     onTabCreated: fn => ipcRenderer.on('tab-created', (_, tabData) => fn(tabData)),
     onTabClosed: fn => ipcRenderer.on('tab-closed', (_, ...args) => fn(...args)),
     onTabSwitched: fn => ipcRenderer.on('tab-switched', (_, ...args) => fn(...args)),
