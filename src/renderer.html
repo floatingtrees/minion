@@ -9,9 +9,29 @@
 
 <body>
     <div id="chrome">
-        <div id="tabbar"></div>
-        <button id="new-tab-button">+</button>
-        <input id="omnibox" placeholder="Search or enter URL" />
+        <div id="tabbar">
+            <button id="new-tab-button">+</button>
+        </div>
+        <div id="navigation-bar">
+            <div class="nav-button-group">
+                <button id="back-button">←</button>
+                <button id="forward-button">→</button>
+            </div>
+            <input id="omnibox" placeholder="Search or enter URL" />
+            <div class="nav-button-group">
+                <button id="screenshot-button">Y</button>
+                <button id="sidebar-button">Z</button>
+            </div>
+        </div>
+    </div>
+    <div id="sidebar" class="sidebar-hidden">
+        <div style="padding: 16px;">
+            <h3>Browser Sidebar</h3>
+            <div style="margin-bottom: 16px; display: flex; gap: 8px;">
+                <input type="text" id="websocket-url" value="localhost:8080" style="flex: 1; padding: 4px 8px;" />
+                <button id="connect-button" style="padding: 4px 12px;">Go</button>
+            </div>
+        </div>
     </div>
 
     <script src="renderer.js"></script>

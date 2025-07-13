@@ -4,14 +4,33 @@ body {
 }
 
 #chrome {
-    height: 48px;
     background: #f3f3f3;
     display: flex;
-    align-items: center;
+    flex-direction: column;
 }
 
 #tabbar {
-    flex: 1;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+}
+
+#navigation-bar {
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    gap: 8px;
+}
+
+.nav-button-group {
+    display: flex;
+    gap: 8px;
 }
 
 .tab {
@@ -21,15 +40,35 @@ body {
     background: #ddd;
     border-radius: 6px;
     cursor: pointer;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.tab.active {
+    background: #fff;
+    border: 1px solid #aaa;
+}
+
+.close-x {
+    margin-left: 6px;
+    cursor: pointer;
+    opacity: 0.7;
+}
+
+.close-x:hover {
+    opacity: 1;
+    color: #ff4444;
 }
 
 #omnibox {
-    width: 400px;
-    margin-right: 16px;
-    height: 28px;
-    padding: 0 8px;
-    border-radius: 6px;
+    width: 500px;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 16px;
     border: 1px solid #bbb;
+    outline: none;
 }
 
 #new-tab-button {
@@ -38,6 +77,50 @@ body {
     border-radius: 50%;
     border: none;
     background: #ccc;
-    margin-right: 8px;
+    margin: 4px 2px;
     cursor: pointer;
+}
+
+#back-button,
+#forward-button,
+#screenshot-button,
+#sidebar-button {
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    border: 1px solid #bbb;
+    background: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+}
+
+#back-button:hover,
+#forward-button:hover,
+#screenshot-button:hover,
+#sidebar-button:hover {
+    background: #f0f0f0;
+}
+
+#sidebar {
+    position: fixed;
+    right: 0;
+    top: 88px;
+    /* Below the chrome area */
+    width: 300px;
+    height: calc(100vh - 88px);
+    background: #fff;
+    border-left: 1px solid #ccc;
+    transition: transform 0.3s ease;
+    z-index: 1000;
+}
+
+#sidebar.sidebar-hidden {
+    transform: translateX(100%);
+}
+
+#sidebar.sidebar-visible {
+    transform: translateX(0);
 }
