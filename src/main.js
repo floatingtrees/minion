@@ -20,12 +20,9 @@ function createAppMenu() {
                     label: 'Close Tab',
                     accelerator: 'CmdOrCtrl+W',
                     click: () => {
-                        console.log('Close tab called - active:', active, 'views.length:', views.length);
                         if (views.length > 0 && views[active]) {
-                            console.log('Closing tab with id:', views[active].webContents.id);
                             closeTab(views[active].webContents.id);
                         } else {
-                            console.log('No valid tab to close');
                         }
                     }
                 }
@@ -72,7 +69,7 @@ app.whenReady().then(() => {
     createAppMenu();
 
     win.loadFile(path.join(__dirname, 'renderer.html'));
-    addTab('https://www.google.com');         // first real web page
+    addTab('https://www.google.com', true);         // first real web page
     win.on('resize', layoutViews);
 });
 
@@ -84,7 +81,6 @@ function addTab(url, notifyRenderer = false) {
     views.push(view);
     const tabIndex = views.length - 1;
     active = tabIndex;
-    console.log('Added tab at index:', tabIndex, 'with id:', view.webContents.id, 'active:', active);
     win.setBrowserView(view);
     layoutViews();
 
@@ -145,9 +141,7 @@ function switchToTab(idx) {
 }
 
 function closeTab(idToClose) {
-    console.log('closeTab called with id:', idToClose, 'views.length:', views.length);
     if (views.length === 1) {
-        console.log('Only one tab left, not closing');
         return;
     }
 
@@ -159,19 +153,15 @@ function closeTab(idToClose) {
             return false;
         }
     });
-    console.log('Found tab at index:', tabIndex);
     if (tabIndex === -1) {
-        console.log('Tab not found, may have already been closed');
         return; // Tab not found, may have already been closed
     }
 
     // Remove view from window and clean up
     if (views[tabIndex]) {
         try {
-            console.log('Removing view at index:', tabIndex);
             // Remove the view from the window
             win.removeBrowserView(views[tabIndex]);
-            console.log('View removed successfully');
         } catch (error) {
             console.error('Error removing view:', error);
         }
@@ -180,7 +170,6 @@ function closeTab(idToClose) {
 
     const newActiveTabIndex = Math.max(0, active - (tabIndex <= active ? 1 : 0));
     active = newActiveTabIndex;
-    console.log('New active tab index:', newActiveTabIndex);
 
     if (views.length > 0) {
         win.setBrowserView(views[active]);
