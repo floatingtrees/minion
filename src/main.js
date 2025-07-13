@@ -20,8 +20,12 @@ function createAppMenu() {
                     label: 'Close Tab',
                     accelerator: 'CmdOrCtrl+W',
                     click: () => {
-                        if (views[active]) {
+                        console.log('Close tab called - active:', active, 'views.length:', views.length);
+                        if (views.length > 0 && views[active]) {
+                            console.log('Closing tab with id:', views[active].webContents.id);
                             closeTab(views[active].webContents.id);
+                        } else {
+                            console.log('No valid tab to close');
                         }
                     }
                 }
@@ -80,6 +84,7 @@ function addTab(url, notifyRenderer = false) {
     views.push(view);
     const tabIndex = views.length - 1;
     active = tabIndex;
+    console.log('Added tab at index:', tabIndex, 'with id:', view.webContents.id, 'active:', active);
     win.setBrowserView(view);
     layoutViews();
 
@@ -140,16 +145,42 @@ function switchToTab(idx) {
 }
 
 function closeTab(idToClose) {
-    if (views.length === 1) return;
+    console.log('closeTab called with id:', idToClose, 'views.length:', views.length);
+    if (views.length === 1) {
+        console.log('Only one tab left, not closing');
+        return;
+    }
 
-    const tabIndex = views.findIndex(v => v.webContents.id === idToClose);
-    if (tabIndex === -1) return; // Tab not found, may have already been closed
+    const tabIndex = views.findIndex(v => {
+        try {
+            return v && v.webContents && v.webContents.id === idToClose;
+        } catch (error) {
+            console.error('Error finding tab:', error);
+            return false;
+        }
+    });
+    console.log('Found tab at index:', tabIndex);
+    if (tabIndex === -1) {
+        console.log('Tab not found, may have already been closed');
+        return; // Tab not found, may have already been closed
+    }
 
-    views[tabIndex].destroy();
+    // Remove view from window and clean up
+    if (views[tabIndex]) {
+        try {
+            console.log('Removing view at index:', tabIndex);
+            // Remove the view from the window
+            win.removeBrowserView(views[tabIndex]);
+            console.log('View removed successfully');
+        } catch (error) {
+            console.error('Error removing view:', error);
+        }
+    }
     views.splice(tabIndex, 1);
 
     const newActiveTabIndex = Math.max(0, active - (tabIndex <= active ? 1 : 0));
     active = newActiveTabIndex;
+    console.log('New active tab index:', newActiveTabIndex);
 
     if (views.length > 0) {
         win.setBrowserView(views[active]);
@@ -166,14 +197,18 @@ function layoutViews() {
 }
 
 /* ───────── IPC handlers ───────── */
-ipcMain.handle('tabs:new', () => addTab('https://google.com', true));
+ipcMain.handle('tabs:new', (_e, idx) => {
+    addTab('https://www.google.com', true)
+});
 
 ipcMain.handle('tabs:activate', (_e, idx) => {
     switchToTab(idx);
 });
 
-ipcMain.handle('tabs:close', (_e, id) => {
-    closeTab(id);
+ipcMain.handle('tabs:close', (_e, idx) => {
+    if (views[idx]) {
+        closeTab(views[idx].webContents.id);
+    }
 });
 
 ipcMain.handle('omnibox:navigate', (_e, raw) => {

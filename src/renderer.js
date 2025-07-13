@@ -94,26 +94,6 @@ omni.addEventListener('keydown', e => {
 });
 
 document.addEventListener('keydown', e => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 't') {
-        api.newTab();
-        tabs.push('New Tab');
-        activeTabIdx = tabs.length - 1;
-        redraw();
-    }
-
-    if ((e.metaKey || e.ctrlKey) && e.key === 'w') {
-        e.preventDefault();
-        closeTab(activeTabIdx);
-    }
-
-    if ((e.metaKey || e.ctrlKey) && e.key >= '1' && e.key <= '9') {
-        const idx = e.key === '9' ? tabs.length - 1 : +e.key - 1;
-        if (idx < tabs.length) {
-            activeTabIdx = idx;
-            api.activateTab(idx);
-            redraw();
-        }
-    }
 
     // Add CMD+arrow navigation
     if ((e.metaKey || e.ctrlKey) && e.key === 'ArrowLeft') {
