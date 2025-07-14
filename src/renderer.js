@@ -9,8 +9,8 @@ const forwardBtn = document.getElementById('forward-button');
 const screenshotBtn = document.getElementById('screenshot-button');
 const sidebarBtn = document.getElementById('sidebar-button');
 const sidebar = document.getElementById('sidebar');
-const wsInput = document.getElementById('websocket-url');
-const connectBtn = document.getElementById('connect-button');
+const sidebarContent = document.getElementById('sidebar-content');
+const searchInput = document.getElementById('search-input');
 let sidebarVisible = false;
 
 function redraw() {
@@ -176,18 +176,105 @@ document.addEventListener('keydown', e => {
     }
 });
 
-function connect() {
-    const ws = new WebSocket(`ws://${wsInput.value}`);
-    ws.onopen = () => console.log('Connected to websocket');
-    ws.onclose = () => console.log('Disconnected from websocket');
-    ws.onerror = (err) => console.error('Websocket error:', err);
+// Sidebar content management functions
+function setSidebarContent(text) {
+    sidebarContent.textContent = text;
+    // Auto-scroll to bottom when new content is added
+    sidebarContent.scrollTop = sidebarContent.scrollHeight;
 }
 
-if (wsInput && connectBtn) {
-    wsInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') connect();
+function appendSidebarContent(text) {
+    sidebarContent.textContent += text;
+    // Auto-scroll to bottom when new content is added
+    sidebarContent.scrollTop = sidebarContent.scrollHeight;
+}
+
+function clearSidebarContent() {
+    sidebarContent.textContent = '';
+}
+
+async function sendSearchQuery(query) {
+    try {
+        // Add query to sidebar content
+        appendSidebarContent(`\n> ${query}\n`);
+
+        const response = await fetch('http://localhost:8080', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ query: query })
+        });
+
+        if (response.ok) {
+            const result = await response.text();
+            console.log('Search response:', result);
+            // Add response to sidebar content
+            appendSidebarContent(`${result}\n`);
+        } else {
+            console.error('Search failed:', response.status, response.statusText);
+            appendSidebarContent(`Error: ${response.status} ${response.statusText}\n`);
+        }
+    } catch (error) {
+        console.error('Search error:', error);
+        appendSidebarContent(`Error: ${error.message}\n`);
+    }
+}
+
+// Auto-resize textarea function
+function autoResizeTextarea(textarea) {
+    // Temporarily reset height to recalculate
+    textarea.style.height = 'auto';
+
+    // Calculate line height and maximum height (6 lines)
+    const computedStyle = getComputedStyle(textarea);
+    const lineHeight = parseFloat(computedStyle.lineHeight);
+    const maxHeight = lineHeight * 6;
+
+    // Get the actual content height needed
+    const contentHeight = textarea.scrollHeight;
+    const newHeight = Math.min(contentHeight, maxHeight);
+
+    // Set the new height
+    textarea.style.height = newHeight + 'px';
+
+    // Handle overflow scrolling
+    if (contentHeight > maxHeight) {
+        textarea.style.overflowY = 'auto';
+    } else {
+        textarea.style.overflowY = 'hidden';
+    }
+}
+
+if (searchInput) {
+    // Auto-resize on input and paste
+    searchInput.addEventListener('input', () => {
+        autoResizeTextarea(searchInput);
     });
-    connectBtn.addEventListener('click', connect);
+
+    searchInput.addEventListener('paste', () => {
+        // Use setTimeout to let paste complete before resizing
+        setTimeout(() => {
+            autoResizeTextarea(searchInput);
+        }, 0);
+    });
+
+    searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault(); // Prevent new line
+            const query = searchInput.value.trim();
+            if (query) {
+                sendSearchQuery(query);
+                searchInput.value = ''; // Clear the input after sending
+                autoResizeTextarea(searchInput); // Reset height
+            }
+        }
+        // Allow Shift+Enter for new lines
+        // Allow standard copy/paste shortcuts (Cmd+C, Cmd+V, Cmd+A, etc.)
+    });
+
+    // Initial resize
+    autoResizeTextarea(searchInput);
 }
 
 /* ───────── update titles from main (optional) ───────── */
@@ -236,6 +323,13 @@ api.onSidebarToggle((isVisible) => {
     sidebar.classList.toggle('sidebar-hidden', !isVisible);
     sidebar.classList.toggle('sidebar-visible', isVisible);
 });
+
+// Expose sidebar functions globally for programmatic access
+window.sidebar = {
+    setContent: setSidebarContent,
+    appendContent: appendSidebarContent,
+    clearContent: clearSidebarContent
+};
 
 /* start with one tab button */
 // Initial tab is created by main process, so no need to draw it here.

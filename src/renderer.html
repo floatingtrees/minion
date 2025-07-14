@@ -25,10 +25,14 @@
         </div>
     </div>
     <div id="sidebar" class="sidebar-hidden">
-        <div style="padding: 16px;">
-            <h3>Browser Sidebar</h3>
-            <div style="margin-bottom: 16px; display: flex; gap: 8px;">
-                <input type="text" id="websocket-url" value="localhost:8080" style="flex: 1; padding: 4px 8px;" />
+        <div style="padding: 16px; height: calc(100vh - 88px - 32px); display: flex; flex-direction: column;">
+            <div id="sidebar-content"
+                style="flex: 1; overflow-y: auto; overflow-x: hidden; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: #f9f9f9; margin-bottom: 16px; white-space: pre-wrap; word-wrap: break-word; font-family: monospace; font-size: 12px; line-height: 1.4; min-height: 0; user-select: text; cursor: text;">
+                Welcome to the browser sidebar. This area can be populated with content programmatically.
+            </div>
+            <div style="flex-shrink: 0;">
+                <textarea id="search-input" placeholder="Enter search query..." rows="1"
+                    style="width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; resize: none; overflow-y: hidden; overflow-x: hidden; font-family: inherit; font-size: 14px; line-height: 1.4; word-wrap: break-word; white-space: pre-wrap;"></textarea>
             </div>
         </div>
     </div>
