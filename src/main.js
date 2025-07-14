@@ -20,9 +20,11 @@ function createAppMenu() {
                     label: 'Close Tab',
                     accelerator: 'CmdOrCtrl+W',
                     click: () => {
-                        if (views.length > 0 && views[active]) {
+                        if (views.length > 1 && views[active]) {
                             closeTab(views[active].webContents.id);
-                        } else {
+                        } else if (views.length === 1) {
+                            // Close the entire application when only 1 tab is left
+                            app.quit();
                         }
                     }
                 }
