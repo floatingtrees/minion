@@ -34,6 +34,11 @@ function redraw() {
 function updateOmnibox() {
     if (tabs[activeTabIdx]) {
         omni.value = tabs[activeTabIdx].url || '';
+        // Keep text selected when switching tabs
+        // Use setTimeout to ensure selection happens after any click events
+        setTimeout(() => {
+            omni.select();
+        }, 0);
     }
 }
 
@@ -93,6 +98,8 @@ omni.addEventListener('keydown', e => {
             tabs[activeTabIdx].url = input;
         }
         api.navigate(input);
+    } else if (e.key === 'Escape') {
+        omni.blur();  // Remove focus on escape
     }
 });
 
@@ -105,7 +112,41 @@ omni.addEventListener('input', e => {
 
 // Select all text when omnibox is focused
 omni.addEventListener('focus', () => {
-    omni.select();
+    // Use setTimeout to ensure selection happens after any blur events
+    // Increased delay to handle BrowserView focus transitions
+    setTimeout(() => {
+        if (document.activeElement === omni) {
+            omni.select();
+        }
+    }, 50);
+});
+
+// Clear selection when omnibox loses focus
+omni.addEventListener('blur', () => {
+    // Add longer delay to handle BrowserView focus transitions
+    setTimeout(() => {
+        // Only clear selection if omnibox is not focused
+        if (document.activeElement !== omni) {
+            // Clear any text selection
+            if (window.getSelection) {
+                window.getSelection().removeAllRanges();
+            }
+            // Also clear the input selection
+            omni.selectionStart = omni.selectionEnd = omni.value.length;
+        }
+    }, 100);
+});
+
+// Handle clicks on the chrome area to properly manage focus
+document.getElementById('chrome').addEventListener('click', (e) => {
+    // If clicking on the omnibox, ensure text gets selected
+    if (e.target.id === 'omnibox') {
+        setTimeout(() => {
+            if (document.activeElement === omni) {
+                omni.select();
+            }
+        }, 0);
+    }
 });
 
 document.addEventListener('keydown', e => {
@@ -164,6 +205,7 @@ api.onUrlChange((idx, url) => {
         // Update omnibox if this is the active tab
         if (idx === activeTabIdx) {
             omni.value = url;
+            omni.select();
         }
     }
 });
@@ -187,6 +229,12 @@ api.onTabClosed(({ closedTabIndex, newActiveTabIndex }) => {
 api.onTabSwitched(({ newActiveTabIndex }) => {
     activeTabIdx = newActiveTabIndex;
     redraw();
+});
+
+api.onSidebarToggle((isVisible) => {
+    sidebarVisible = isVisible;
+    sidebar.classList.toggle('sidebar-hidden', !isVisible);
+    sidebar.classList.toggle('sidebar-visible', isVisible);
 });
 
 /* start with one tab button */

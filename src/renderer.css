@@ -71,6 +71,15 @@ body {
     outline: none;
 }
 
+/* Hide text selection when omnibox is not focused */
+#omnibox:not(:focus)::selection {
+    background: transparent;
+}
+
+#omnibox:not(:focus)::-moz-selection {
+    background: transparent;
+}
+
 #new-tab-button {
     width: 28px;
     height: 28px;

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, BrowserView, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, Menu } = require('electron');
 const path = require('node:path');
 
 const PARTITION = 'persist:main';           // shared session survives restarts
@@ -34,6 +34,16 @@ function createAppMenu() {
                 { role: 'reload' },
                 { role: 'forceReload' },
                 { role: 'toggleDevTools' },
+                { type: 'separator' },
+                {
+                    label: 'Toggle Sidebar',
+                    accelerator: 'CmdOrCtrl+Shift+A',
+                    click: () => {
+                        sidebarVisible = !sidebarVisible;
+                        win.webContents.send('sidebar:toggle', sidebarVisible);
+                        layoutViews();
+                    }
+                }
             ]
         },
         {
@@ -66,6 +76,9 @@ app.whenReady().then(() => {
         }
     });
 
+    // Increase max listeners to prevent warnings during development
+    win.setMaxListeners(20);
+
     createAppMenu();
 
     win.loadFile(path.join(__dirname, 'renderer.html'));
@@ -80,22 +93,23 @@ app.whenReady().then(() => {
 
 /* ───────── tab helpers ───────── */
 function addTab(url, notifyRenderer = false) {
-    const view = new BrowserView({
+    const view = new WebContentsView({
         webPreferences: { partition: PARTITION }
     });
     views.push(view);
     const tabIndex = views.length - 1;
     active = tabIndex;
-    win.setBrowserView(view);
+    win.contentView.addChildView(view);
+    // Hide all other views and show only the new one
+    views.forEach((v, i) => v.setVisible(i === tabIndex));
     layoutViews();
 
-    // Listen for title changes
-    view.webContents.on('page-title-updated', (event, title) => {
+    // Store listener references so we can remove them later
+    const titleListener = (event, title) => {
         win.webContents.send('tab:title', tabIndex, title);
-    });
+    };
 
-    // Listen for page load completion to get initial title and URL
-    view.webContents.on('did-finish-load', () => {
+    const loadListener = () => {
         const title = view.webContents.getTitle();
         const url = view.webContents.getURL();
         if (title && title !== '') {
@@ -104,10 +118,9 @@ function addTab(url, notifyRenderer = false) {
         if (url && url !== '') {
             win.webContents.send('tab:url', tabIndex, url);
         }
-    });
+    };
 
-    // Handle back/forward shortcuts
-    view.webContents.on('before-input-event', (event, input) => {
+    const inputListener = (event, input) => {
         if (input.meta || input.control) {
             if (input.key.toLowerCase() === 'arrowleft') {
                 if (view.webContents.navigationHistory.canGoBack()) {
@@ -122,7 +135,19 @@ function addTab(url, notifyRenderer = false) {
                 event.preventDefault();
             }
         }
-    });
+    };
+
+    // Store listeners on the view object for cleanup
+    view._listeners = {
+        title: titleListener,
+        load: loadListener,
+        input: inputListener
+    };
+
+    // Add listeners
+    view.webContents.on('page-title-updated', titleListener);
+    view.webContents.on('did-finish-load', loadListener);
+    view.webContents.on('before-input-event', inputListener);
 
     // Handle new window requests by redirecting to current tab
     view.webContents.setWindowOpenHandler(({ url }) => {
@@ -144,7 +169,10 @@ function addTab(url, notifyRenderer = false) {
 function switchToTab(idx) {
     if (views[idx]) {
         active = idx;
-        win.setBrowserView(views[idx]);
+        // Hide all views first
+        views.forEach(view => view.setVisible(false));
+        // Show the active view
+        views[idx].setVisible(true);
         win.webContents.send('tab-switched', { newActiveTabIndex: idx });
     }
 }
@@ -169,8 +197,15 @@ function closeTab(idToClose) {
     // Remove view from window and clean up
     if (views[tabIndex]) {
         try {
+            // Remove event listeners to prevent memory leaks
+            if (views[tabIndex]._listeners) {
+                views[tabIndex].webContents.removeListener('page-title-updated', views[tabIndex]._listeners.title);
+                views[tabIndex].webContents.removeListener('did-finish-load', views[tabIndex]._listeners.load);
+                views[tabIndex].webContents.removeListener('before-input-event', views[tabIndex]._listeners.input);
+            }
+
             // Remove the view from the window
-            win.removeBrowserView(views[tabIndex]);
+            win.contentView.removeChildView(views[tabIndex]);
         } catch (error) {
             console.error('Error removing view:', error);
         }
@@ -181,7 +216,8 @@ function closeTab(idToClose) {
     active = newActiveTabIndex;
 
     if (views.length > 0) {
-        win.setBrowserView(views[active]);
+        views.forEach(view => view.setVisible(false));
+        views[active].setVisible(true);
     }
 
     win.webContents.send('tab-closed', { closedTabIndex: tabIndex, newActiveTabIndex });
@@ -227,6 +263,9 @@ ipcMain.handle('omnibox:navigate', (_e, raw) => {
         // Search query
         url = `https://www.google.com/search?q=${encodeURIComponent(input)}`;
     }
+
+    // Immediately update the omnibox to show the detected URL
+    win.webContents.send('tab:url', active, url);
 
     views[active].webContents.loadURL(url);
 

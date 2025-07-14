@@ -14,4 +14,5 @@ contextBridge.exposeInMainWorld('browserAPI', {
     onTabCreated: fn => ipcRenderer.on('tab-created', (_, tabData) => fn(tabData)),
     onTabClosed: fn => ipcRenderer.on('tab-closed', (_, ...args) => fn(...args)),
     onTabSwitched: fn => ipcRenderer.on('tab-switched', (_, ...args) => fn(...args)),
+    onSidebarToggle: fn => ipcRenderer.on('sidebar:toggle', (_, isVisible) => fn(isVisible)),
 });
