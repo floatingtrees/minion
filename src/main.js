@@ -1,8 +1,30 @@
-const { app, BrowserWindow, WebContentsView, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, Menu, session } = require('electron');
 const path = require('node:path');
+// Adblocker imports
+const { ElectronBlocker } = require('@ghostery/adblocker-electron');
+const fetch = require('cross-fetch');
 
 const PARTITION = 'persist:main';           // shared session survives restarts
 let win, views = [], active = 0, sidebarVisible = false;
+
+// Initialize adblocker before any windows are created
+let blockerReady = false;
+let blocker = null;
+ElectronBlocker.fromPrebuiltAdsAndTracking(fetch).then((b) => {
+    blocker = b;
+    blockerReady = true;
+    // Only enable on default session initially, partition session will be enabled when first tab is created
+    try {
+        // Increase max listeners for sessions to handle ad blocker listeners
+        session.defaultSession.setMaxListeners(50);
+        session.fromPartition(PARTITION).setMaxListeners(50);
+
+        blocker.enableBlockingInSession(session.defaultSession);
+        console.log('Adblocker enabled for default session.');
+    } catch (error) {
+        console.warn('Could not enable ad blocking on default session:', error.message);
+    }
+});
 
 /* ───────── app menu ───────── */
 function createAppMenu() {
@@ -72,9 +94,10 @@ function createAppMenu() {
 /* ───────── create window + first tab ───────── */
 app.whenReady().then(() => {
     win = new BrowserWindow({
-        width: 1280, height: 800,
+        width: 1280, height: 800, resizable: true,
         webPreferences: {
-            preload: path.join(__dirname, 'preload.js')
+            preload: path.join(__dirname, 'preload.js'),
+            backgroundThrottling: false
         }
     });
 
@@ -99,6 +122,8 @@ function addTab(url, notifyRenderer = false) {
         webPreferences: { partition: PARTITION }
     });
     views.push(view);
+    const [w, h] = win.getSize();
+    console.log(`frame size = ${w} × ${h}`);
     const tabIndex = views.length - 1;
     active = tabIndex;
     win.contentView.addChildView(view);
@@ -292,24 +317,42 @@ ipcMain.handle('navigation:forward', () => {
     }
 });
 
+ipcMain.on('renderer-log', (event, message) => {
+    console.log(`[Renderer] ${message}`);
+});
 ipcMain.handle('page:screenshot', async () => {
-    if (views[active]) {
+    const image = await views[active].webContents.capturePage();
+    const pngBuffer = image.toPNG();
+    const base64 = pngBuffer.toString('base64');
+    return base64; // Returned to renderer
+});
+
+ipcMain.handle('automation:leftClick', async (event, x, y) => {
+    if (views[active] && views[active].webContents) {
         try {
-            const image = await views[active].webContents.capturePage();
-            const { shell } = require('electron');
-            const fs = require('fs');
-            const os = require('os');
+            // Send a mouse click event to the active tab's webContents
+            await views[active].webContents.sendInputEvent({
+                type: 'mouseDown',
+                button: 'left',
+                x: x,
+                y: y
+            });
 
-            // Save screenshot to desktop
-            const screenshotPath = path.join(os.homedir(), 'Desktop', `screenshot-${Date.now()}.png`);
-            fs.writeFileSync(screenshotPath, image.toPNG());
+            await views[active].webContents.sendInputEvent({
+                type: 'mouseUp',
+                button: 'left',
+                x: x,
+                y: y
+            });
 
-            // Show the file in finder/explorer
-            shell.showItemInFolder(screenshotPath);
-
-            return screenshotPath;
+            console.log(`Left click sent to coordinates (${x}, ${y})`);
+            return true;
         } catch (error) {
-            console.error('Screenshot failed:', error);
+            console.error('Error sending left click:', error);
+            return false;
         }
+    } else {
+        console.error('No active tab to send click to');
+        return false;
     }
 });

@@ -25,6 +25,8 @@
     "playwright-core": "^1.53.2"
   },
   "dependencies": {
+    "@ghostery/adblocker-electron": "^2.11.1",
+    "cross-fetch": "^4.1.0",
     "electron-squirrel-startup": "^1.0.1"
   }
 }

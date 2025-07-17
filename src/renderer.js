@@ -76,11 +76,11 @@ screenshotBtn.addEventListener('click', async () => {
     try {
         const screenshotPath = await api.takeScreenshot();
         if (screenshotPath) {
-            console.log('Screenshot saved to:', screenshotPath);
+            window.browserAPI.log('Screenshot saved to:', screenshotPath);
             // You could show a notification here
         }
     } catch (error) {
-        console.error('Screenshot failed:', error);
+        window.browserAPI.log('Screenshot failed:', error);
     }
 });
 
@@ -193,12 +193,107 @@ function clearSidebarContent() {
     sidebarContent.textContent = '';
 }
 
+async function processAction(action_info) {
+    const action = action_info["action"]
+    if (action === 'screenshot') {
+        const base64Image = await api.takeScreenshot();
+        return base64Image;
+    }
+    else if (action === 'left_click') {
+        // Extract coordinates from action data
+        const coordinate = action_info["coordinate"];
+        const x = coordinate.x;
+        const y = coordinate.y;
+
+        // Send click event to the active view
+        const result = await api.leftClick(x, y);
+        return result;
+
+    }
+    else {
+        window.browserAPI.log("Action not found:", action);
+    }
+}
+
+async function pingServer(token) {
+    try {
+        const response = await fetch('http://localhost:8080/task-ping', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ token: token })
+        });
+
+
+        if (response.ok) {
+            const responseData = await response.json(); // Parse JSON response
+            return_list = []
+            if (typeof responseData === 'object' && responseData !== null) {
+                const actionList = responseData["response"];
+
+                if (Array.isArray(actionList)) {
+                    window.browserAPI.log(actionList);
+                    for (const actionData of actionList) {
+                        const result = await processAction(actionData["action_info"]);
+                        result_data = {
+                            "type": actionData["type"],
+                            "content": result, "tool_use_id": actionData["tool_use_id"]
+                        }
+                        return_list.push(result_data)
+                    }
+                    return return_list;
+                } else {
+                    window.browserAPI.log("'action' is not a list:", actionList);
+                }
+            } else {
+                window.browserAPI.log("Response data is not a valid object.");
+            }
+
+        } else {
+            window.browserAPI.log('Ping failed:', response.status, response.statusText);
+            appendSidebarContent(`Error: ${response.status} ${response.statusText}\n`);
+        }
+    } catch (error) {
+        window.browserAPI.log('Ping error:', error);
+        appendSidebarContent(`Error: ${error.message}\n`);
+    }
+}
+
+async function returnTasks(token, return_list) {
+    try {
+        const response = await fetch('http://localhost:8080/tool-results', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ token: token, results: return_list })
+        });
+        if (response.ok) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            const token = response.headers.get('X-Task-Id'); // token part works
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+
+                const text = decoder.decode(value, { stream: true });
+                appendSidebarContent(text);
+            }
+            appendSidebarContent('\n'); // Add final newline
+        }
+    } catch (error) {
+        window.browserAPI.log('Return tasks error:', error);
+    }
+}
+
 async function sendSearchQuery(query) {
     try {
         // Add query to sidebar content
         appendSidebarContent(`\n> ${query}\n`);
 
-        const response = await fetch('http://localhost:8080', {
+        const response = await fetch('http://localhost:8080/agent-execution', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -207,16 +302,28 @@ async function sendSearchQuery(query) {
         });
 
         if (response.ok) {
-            const result = await response.text();
-            console.log('Search response:', result);
-            // Add response to sidebar content
-            appendSidebarContent(`${result}\n`);
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            const token = response.headers.get('X-Task-Id'); // token part works
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+
+                const text = decoder.decode(value, { stream: true });
+                appendSidebarContent(text);
+            }
+            appendSidebarContent('\n'); // Add final newline
+            await new Promise(resolve => setTimeout(resolve, 10));
+            const return_list = await pingServer(token);
+            await returnTasks(token, return_list);
+
         } else {
-            console.error('Search failed:', response.status, response.statusText);
+            window.browserAPI.log('Search failed:', response.status, response.statusText);
             appendSidebarContent(`Error: ${response.status} ${response.statusText}\n`);
         }
     } catch (error) {
-        console.error('Search error:', error);
+        window.browserAPI.log('Search error:', error);
         appendSidebarContent(`Error: ${error.message}\n`);
     }
 }
@@ -296,6 +403,14 @@ api.onUrlChange((idx, url) => {
         }
     }
 });
+
+// Global test function for leftClick (can be called from developer console)
+window.testLeftClick = async function (x = 100, y = 100) {
+    console.log(`Testing left click at coordinates (${x}, ${y})`);
+    const result = await api.leftClick(x, y);
+    console.log('Left click result:', result);
+    return result;
+};
 
 api.onTabCreated((tabData) => {
     tabs.push({ id: tabData.id, title: 'New Tab', url: tabData.url || '' });
