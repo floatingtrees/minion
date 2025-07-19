@@ -197,7 +197,11 @@ async function processAction(action_info) {
     const action = action_info["action"]
     if (action === 'screenshot') {
         const base64Image = await api.takeScreenshot();
-        return base64Image;
+        const content = {
+            "type": "image",
+            "source": { "type": "base64", "media_type": "image/jpeg", "data": base64Image }
+        }
+        return content;
     }
     else if (action === 'left_click') {
         // Extract coordinates from action data
@@ -236,6 +240,7 @@ async function pingServer(token) {
                     window.browserAPI.log(actionList);
                     for (const actionData of actionList) {
                         const result = await processAction(actionData["action_info"]);
+
                         result_data = {
                             "type": actionData["type"],
                             "content": result, "tool_use_id": actionData["tool_use_id"]

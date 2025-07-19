@@ -322,8 +322,8 @@ ipcMain.on('renderer-log', (event, message) => {
 });
 ipcMain.handle('page:screenshot', async () => {
     const image = await views[active].webContents.capturePage();
-    const pngBuffer = image.toPNG();
-    const base64 = pngBuffer.toString('base64');
+    const jpgBuffer = image.toJPEG(80); // 100 is quality, max quality
+    const base64 = jpgBuffer.toString('base64');
     return base64; // Returned to renderer
 });
 
