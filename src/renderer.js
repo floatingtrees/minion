@@ -193,146 +193,127 @@ function clearSidebarContent() {
     sidebarContent.textContent = '';
 }
 
-async function processAction(action_info) {
-    const action = action_info["action"]
-    if (action === 'screenshot') {
-        const base64Image = await api.takeScreenshot();
-        const content = {
-            "type": "image",
-            "source": { "type": "base64", "media_type": "image/jpeg", "data": base64Image }
-        }
-        return content;
-    }
-    else if (action === 'left_click') {
-        // Extract coordinates from action data
-        const coordinate = action_info["coordinate"];
-        const x = coordinate.x;
-        const y = coordinate.y;
+async function processAction(actionInfo) {
+    const { action } = actionInfo;
 
-        // Send click event to the active view
-        const result = await api.leftClick(x, y);
-        return result;
+    if (action === "screenshot") {
+        // Get raw data‑URL from the preload bridge
+        const dataUrl = await api.takeScreenshot();          // "data:image/jpeg;base64,/9j/4AAQ…"
+        // Split once to drop the prefix
+        const base64Data = dataUrl.split(",")[0];
+        window.browserAPI.log(base64Data);
+        // Return *only* the image block (the outer tool_result
+        // wrapper is built later in pingServer)
+        return {
+            type: "image",
+            source: {
+                type: "base64",
+                media_type: "image/jpeg",
+                data: base64Data                                // <‑ no "data:" prefix
+            }
+        };
+    }
 
+    if (action === "left_click") {
+        const { x, y } = actionInfo.coordinate;
+        return await api.leftClick(x, y);                   // whatever your bridge returns
     }
-    else {
-        window.browserAPI.log("Action not found:", action);
-    }
+
+    window.browserAPI.log("Unknown action:", action);
+    return null;
 }
+
 
 async function pingServer(token) {
     try {
-        const response = await fetch('http://localhost:8080/task-ping', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ token: token })
+        const res = await fetch("http://localhost:8080/task-ping", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token })
         });
 
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
 
-        if (response.ok) {
-            const responseData = await response.json(); // Parse JSON response
-            return_list = []
-            if (typeof responseData === 'object' && responseData !== null) {
-                const actionList = responseData["response"];
+        const { response: actionList } = await res.json();
+        if (!Array.isArray(actionList) || !actionList.length) return []; // nothing to do
 
-                if (Array.isArray(actionList)) {
-                    window.browserAPI.log(actionList);
-                    for (const actionData of actionList) {
-                        const result = await processAction(actionData["action_info"]);
+        const results = [];
+        for (const a of actionList) {
+            const contentBlock = await processAction(a.action_info);
+            if (!contentBlock) continue;                       // skip if null
 
-                        result_data = {
-                            "type": actionData["type"],
-                            "content": result, "tool_use_id": actionData["tool_use_id"]
-                        }
-                        return_list.push(result_data)
-                    }
-                    return return_list;
-                } else {
-                    window.browserAPI.log("'action' is not a list:", actionList);
-                }
-            } else {
-                window.browserAPI.log("Response data is not a valid object.");
-            }
-
-        } else {
-            window.browserAPI.log('Ping failed:', response.status, response.statusText);
-            appendSidebarContent(`Error: ${response.status} ${response.statusText}\n`);
+            results.push({
+                type: "tool_result",                             // literal must match backend
+                tool_use_id: a.tool_use_id,
+                content: [contentBlock]                          // MUST be an array
+            });
         }
-    } catch (error) {
-        window.browserAPI.log('Ping error:', error);
-        appendSidebarContent(`Error: ${error.message}\n`);
+        return results;
+    } catch (err) {
+        window.browserAPI.log("Ping error:", err);
+        appendSidebarContent(`Error: ${err.message}\n`);
+        return [];
     }
 }
 
-async function returnTasks(token, return_list) {
+async function returnTasks(token, results) {
+    if (!results.length) return;                           // nothing to send
+
     try {
-        const response = await fetch('http://localhost:8080/tool-results', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ token: token, results: return_list })
+        const res = await fetch("http://localhost:8080/tool-results", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token, results })
         });
-        if (response.ok) {
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            const token = response.headers.get('X-Task-Id'); // token part works
 
-            while (true) {
-                const { value, done } = await reader.read();
-                if (done) break;
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
 
-                const text = decoder.decode(value, { stream: true });
-                appendSidebarContent(text);
-            }
-            appendSidebarContent('\n'); // Add final newline
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            appendSidebarContent(decoder.decode(value, { stream: true }));
         }
-    } catch (error) {
-        window.browserAPI.log('Return tasks error:', error);
+        appendSidebarContent("\n");
+    } catch (err) {
+        window.browserAPI.log("Return‑tasks error:", err);
     }
 }
+
 
 async function sendSearchQuery(query) {
-    try {
-        // Add query to sidebar content
-        appendSidebarContent(`\n> ${query}\n`);
+    appendSidebarContent(`\n> ${query}\n`);
 
-        const response = await fetch('http://localhost:8080/agent-execution', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ query: query })
+    try {
+        const res = await fetch("http://localhost:8080/agent-execution", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query })
         });
 
-        if (response.ok) {
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            const token = response.headers.get('X-Task-Id'); // token part works
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
 
-            while (true) {
-                const { value, done } = await reader.read();
-                if (done) break;
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        const token = res.headers.get("X-Task-Id");          // save for follow‑ups
 
-                const text = decoder.decode(value, { stream: true });
-                appendSidebarContent(text);
-            }
-            appendSidebarContent('\n'); // Add final newline
-            await new Promise(resolve => setTimeout(resolve, 10));
-            const return_list = await pingServer(token);
-            await returnTasks(token, return_list);
-
-        } else {
-            window.browserAPI.log('Search failed:', response.status, response.statusText);
-            appendSidebarContent(`Error: ${response.status} ${response.statusText}\n`);
+        // Stream assistant text
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            appendSidebarContent(decoder.decode(value, { stream: true }));
         }
-    } catch (error) {
-        window.browserAPI.log('Search error:', error);
-        appendSidebarContent(`Error: ${error.message}\n`);
+        appendSidebarContent("\n");
+
+        // Handle any tool_use requests that came back
+        const results = await pingServer(token);
+        await returnTasks(token, results);
+    } catch (err) {
+        window.browserAPI.log("Search error:", err);
+        appendSidebarContent(`Error: ${err.message}\n`);
     }
 }
-
 // Auto-resize textarea function
 function autoResizeTextarea(textarea) {
     // Temporarily reset height to recalculate
