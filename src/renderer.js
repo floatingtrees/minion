@@ -2,6 +2,10 @@ const api = window.browserAPI;
 const tabs = [];                        // store {id, title, url} for each tab
 let activeTabIdx = 0;                   // track the currently active tab
 const bar = document.getElementById('tabbar');
+const tabCoordIndicator = document.createElement('span');
+tabCoordIndicator.id = 'tab-coord-indicator';
+tabCoordIndicator.textContent = 'Mouse: --';
+tabCoordIndicator.style.cssText = 'margin-left:auto;padding:4px 8px;font-size:12px;color:#444;white-space:nowrap;';
 const omni = document.getElementById('omnibox');
 const newTabBtn = document.getElementById('new-tab-button');
 const backBtn = document.getElementById('back-button');
@@ -13,6 +17,56 @@ const sidebarContent = document.getElementById('sidebar-content');
 const searchInput = document.getElementById('search-input');
 let sidebarVisible = false;
 
+const SERVER_VIEW_WIDTH = 1280;
+const SERVER_VIEW_HEIGHT = 800;
+
+async function mapServerCoordsToWindow(serverX = 0, serverY = 0) {
+    const view = await api.getViewSize();
+    if (!view || !view.width || !view.height) {
+        window.browserAPI.log("No view size found, using server coords", serverX, serverY);
+        return {
+            x: Math.round(serverX),
+            y: Math.round(serverY)
+        };
+    }
+
+    const clampedX = Math.min(Math.max(serverX, 0), SERVER_VIEW_WIDTH);
+    const clampedY = Math.min(Math.max(serverY, 0), SERVER_VIEW_HEIGHT);
+
+    const relativeX = Math.round((clampedX / SERVER_VIEW_WIDTH) * (view.width - 1));
+    const relativeY = Math.round((clampedY / SERVER_VIEW_HEIGHT) * (view.height - 1));
+
+    const windowX = view.x + relativeX;
+    const windowY = view.y + relativeY;
+    //window.browserAPI.log(`${view.width}, ${view.height}, ${view.x}, ${view.y}`);
+    return {
+        x: windowX,
+        y: windowY
+    };
+}
+
+async function INVERSEmapServerCoordsToWindow(browserX = 0, browserY = 0) {
+    const view = await api.getViewSize();
+    if (!view || !view.width || !view.height) {
+        return {
+            x: Math.round(browserX),
+            y: Math.round(browserY)
+        };
+    }
+
+    const relativeX = browserX - view.x;
+    const relativeY = browserY;
+
+    const serverX = Math.round((relativeX / (view.width - 1)) * SERVER_VIEW_WIDTH);
+    const serverY = Math.round((relativeY / (view.height - 1)) * SERVER_VIEW_HEIGHT);
+
+    //window.browserAPI.log(`INVERSE ${view.width}, ${view.height}, ${view.x}, ${view.y}`);
+    return {
+        x: serverX,
+        y: serverY
+    };
+}
+
 function redraw() {
     // Create tabs HTML with fixed width to prevent overflow
     const tabsHTML = tabs.map((t, i) => {
@@ -23,9 +77,9 @@ function redraw() {
     }).join('');
 
     // Preserve the new tab button by temporarily removing it, updating innerHTML, then re-adding it
-    const newTabButton = bar.querySelector('#new-tab-button');
     bar.innerHTML = tabsHTML;
-    bar.appendChild(newTabButton);
+    if (newTabBtn) bar.appendChild(newTabBtn);
+    bar.appendChild(tabCoordIndicator);
 
     // Update omnibox to show current tab's URL
     updateOmnibox();
@@ -74,13 +128,19 @@ forwardBtn.addEventListener('click', () => {
 
 screenshotBtn.addEventListener('click', async () => {
     try {
-        const screenshotPath = await api.takeScreenshot();
-        if (screenshotPath) {
-            window.browserAPI.log('Screenshot saved to:', screenshotPath);
-            // You could show a notification here
-        }
+        const view = await api.getViewSize();
+        const cursor = await api.getGlobalCursorPosition();
+
+        const frameMsg = `View frame: ${view.width} × ${view.height} at (${view.x}, ${view.y})`;
+        const cursorMsg = `Cursor position: (${cursor.x}, ${cursor.y})`;
+
+        console.log(frameMsg);
+        console.log(cursorMsg);
+        window.browserAPI.log(frameMsg);
+        window.browserAPI.log(cursorMsg);
     } catch (error) {
-        window.browserAPI.log('Screenshot failed:', error);
+        console.error('Error fetching frame size or cursor position:', error);
+        window.browserAPI.log(`Error: ${error.message || error}`);
     }
 });
 
@@ -197,11 +257,9 @@ async function processAction(actionInfo) {
     const { action } = actionInfo;
 
     if (action === "screenshot") {
-        // Get raw data‑URL from the preload bridge
-        const dataUrl = await api.takeScreenshot();          // "data:image/jpeg;base64,/9j/4AAQ…"
-        // Split once to drop the prefix
-        const base64Data = dataUrl.split(",")[0];
-        window.browserAPI.log(base64Data);
+        // Get base64 data directly from the preload bridge (captures entire window)
+        const base64Data = await api.takeScreenshot();
+        window.browserAPI.log("Screenshot captured (entire window)");
         // Return *only* the image block (the outer tool_result
         // wrapper is built later in pingServer)
         return {
@@ -209,14 +267,25 @@ async function processAction(actionInfo) {
             source: {
                 type: "base64",
                 media_type: "image/jpeg",
-                data: base64Data                                // <‑ no "data:" prefix
+                data: base64Data                                // direct base64 data
             }
         };
     }
 
-    if (action === "left_click") {
-        const { x, y } = actionInfo.coordinate;
+    else if (action === "left_click") {
+        const serverCoord = actionInfo.coordinate ?? { x: 0, y: 0 };
+        const { x, y } = await mapServerCoordsToWindow(serverCoord.x, serverCoord.y);
+        window.browserAPI.log("CLICKED", x, y);
         return await api.leftClick(x, y);                   // whatever your bridge returns
+    }
+    else if (action === "type") {
+        const text = actionInfo.text ?? "";
+        return await api.type(text);
+    }
+    else if (action === "mouse_move") {
+        const serverCoord = actionInfo.coordinate ?? { x: 0, y: 0 };
+        const { x, y } = await mapServerCoordsToWindow(serverCoord.x, serverCoord.y);
+        return await api.mouseMove(x, y);
     }
 
     window.browserAPI.log("Unknown action:", action);
@@ -307,8 +376,7 @@ async function sendSearchQuery(query) {
         appendSidebarContent("\n");
 
         // Handle any tool_use requests that came back
-        const results = await pingServer(token);
-        await returnTasks(token, results);
+        await runComputerUseLoop(token);
     } catch (err) {
         window.browserAPI.log("Search error:", err);
         appendSidebarContent(`Error: ${err.message}\n`);
@@ -432,5 +500,70 @@ window.sidebar = {
     clearContent: clearSidebarContent
 };
 
+// Track mouse position globally (works over web content too)
+async function updateTabMouseIndicator() {
+    try {
+        const [cursor, view] = await Promise.all([
+            api.getGlobalCursorPosition(),
+            api.getViewSize()
+        ]);
+
+        if (!cursor) {
+            tabCoordIndicator.textContent = 'Mouse: --';
+            return;
+        }
+
+        let label = `Mouse: (${Math.round(cursor.x)}, ${Math.round(cursor.y)})`;
+
+        if (view && view.width && view.height) {
+            const withinView = cursor.x >= view.x && cursor.x < view.x + view.width &&
+                cursor.y >= view.y && cursor.y < view.y + view.height;
+
+            if (withinView) {
+                const relX = Math.round(cursor.x - view.x);
+                const relY = Math.round(cursor.y - view.y);
+                const { x, y } = await INVERSEmapServerCoordsToWindow(relX, relY)
+                label = `Web: (${cursor.x}, ${cursor.y}, ${x}, ${y})`;
+            } else {
+                label = `UI: (${Math.round(cursor.x)}, ${Math.round(cursor.y)})`;
+            }
+        }
+
+        tabCoordIndicator.textContent = label;
+    } catch (error) {
+        tabCoordIndicator.textContent = 'Mouse: --';
+    }
+}
+
+setInterval(updateTabMouseIndicator, 100);
+updateTabMouseIndicator();
+
+window.getDisplayBounds = async function () {
+    const view = await api.getViewSize();
+    if (!view) return null;
+    return {
+        x: view.x,
+        y: view.y,
+        width: view.width,
+        height: view.height
+    };
+};
+
 /* start with one tab button */
 // Initial tab is created by main process, so no need to draw it here.
+
+async function runComputerUseLoop(token) {
+    const MAX_ITERATIONS = 12;
+
+    for (let i = 0; i < MAX_ITERATIONS; i++) {
+        const actions = await pingServer(token);
+        if (!actions.length) {
+            window.browserAPI.log("computer-use: no actions, stopping");
+            return;
+        }
+
+        await returnTasks(token, actions);
+    }
+
+    window.browserAPI.log("computer-use: reached max iterations");
+}

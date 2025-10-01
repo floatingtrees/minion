@@ -1,4 +1,10 @@
-const { app, BrowserWindow, WebContentsView, ipcMain, Menu, session } = require('electron');
+// Coding Instructions:
+// Do not use focused window for anything; if you need a particular window, get it by indexing the list
+// All code added should work even if the app is minimized; do not refactor existing code unless deliberately asked to do so
+// Only work on what you are told to do. 
+
+
+const { app, BrowserWindow, WebContentsView, ipcMain, Menu, session, screen } = require('electron');
 const path = require('node:path');
 // Adblocker imports
 const { ElectronBlocker } = require('@ghostery/adblocker-electron');
@@ -253,8 +259,7 @@ function closeTab(idToClose) {
 function layoutViews() {
     const [w, h] = win.getContentSize();
     const viewWidth = sidebarVisible ? w - 300 : w;
-    // Reserve 88px for tabstrip + navigation bar (40px + 48px)
-    views.forEach(v => v.setBounds({ x: 0, y: 88, width: viewWidth, height: h - 88 }));
+    views.forEach(v => v.setBounds({ x: 0, y: 110, width: viewWidth, height: h - 110 }));
 }
 
 /* ───────── IPC handlers ───────── */
@@ -328,31 +333,212 @@ ipcMain.handle('page:screenshot', async () => {
 });
 
 ipcMain.handle('automation:leftClick', async (event, x, y) => {
-    if (views[active] && views[active].webContents) {
-        try {
-            // Send a mouse click event to the active tab's webContents
-            await views[active].webContents.sendInputEvent({
+    const win = BrowserWindow.getFocusedWindow();
+    if (!win) {
+        console.error('No focused window found');
+        return false;
+    }
+
+    try {
+        // Get the actual height of the browser chrome dynamically
+        const chromeHeight = await win.webContents.executeJavaScript(`
+            (() => {
+                const tabbar = document.getElementById('tabbar');
+                const navbar = document.getElementById('navigation-bar');
+                const tabbarHeight = tabbar ? tabbar.offsetHeight : 0;
+                const navbarHeight = navbar ? navbar.offsetHeight : 0;
+                return tabbarHeight + navbarHeight;
+            })()
+        `) || 89;
+
+        // Check if click is in the browser UI area (top part)
+        if (y < chromeHeight) {
+            console.log(`Click in browser UI area at (${x}, ${y})`);
+            // Send click to the main window's web contents (browser UI)
+            await win.webContents.sendInputEvent({
                 type: 'mouseDown',
                 button: 'left',
                 x: x,
                 y: y
             });
 
-            await views[active].webContents.sendInputEvent({
+            await win.webContents.sendInputEvent({
                 type: 'mouseUp',
                 button: 'left',
                 x: x,
                 y: y
             });
+        } else {
+            console.log(`Click in web content area at (${x}, ${y})`);
+            // Adjust coordinates for web content (subtract chrome height)
+            const webContentX = x;
+            const webContentY = y - chromeHeight;
 
-            console.log(`Left click sent to coordinates (${x}, ${y})`);
+            if (views[active] && views[active].webContents) {
+                await views[active].webContents.sendInputEvent({
+                    type: 'mouseDown',
+                    button: 'left',
+                    x: webContentX,
+                    y: webContentY
+                });
+
+                await views[active].webContents.sendInputEvent({
+                    type: 'mouseUp',
+                    button: 'left',
+                    x: webContentX,
+                    y: webContentY
+                });
+            } else {
+                console.error('No active tab for web content click');
+                return false;
+            }
+        }
+
+        console.log(`Left click sent to coordinates (${x}, ${y})`);
+        return true;
+    } catch (error) {
+        console.error('Error sending left click:', error);
+        return false;
+    }
+});
+
+ipcMain.handle('automation:type', async (event, text) => {
+    if (views[active] && views[active].webContents) {
+        try {
+            // Send each character as a keyDown/keyUp event
+            for (const char of text) {
+                await views[active].webContents.sendInputEvent({
+                    type: 'char',
+                    keyCode: char
+                });
+            }
+
+            console.log(`Typed text: "${text}"`);
             return true;
         } catch (error) {
-            console.error('Error sending left click:', error);
+            console.error('Error typing text:', error);
             return false;
         }
     } else {
-        console.error('No active tab to send click to');
+        console.error('No active tab to type in');
         return false;
+    }
+});
+
+ipcMain.handle('automation:mouseMove', async (event, x, y) => {
+    const win = BrowserWindow.getFocusedWindow();
+    if (!win) {
+        console.error('No focused window found');
+        return false;
+    }
+
+    try {
+        // Get the actual height of the browser chrome dynamically
+        const chromeHeight = await win.webContents.executeJavaScript(`
+            (() => {
+                const tabbar = document.getElementById('tabbar');
+                const navbar = document.getElementById('navigation-bar');
+                const tabbarHeight = tabbar ? tabbar.offsetHeight : 0;
+                const navbarHeight = navbar ? navbar.offsetHeight : 0;
+                return tabbarHeight + navbarHeight;
+            })()
+        `) || 88;
+
+        // Check if mouse move is in the browser UI area
+        if (y < chromeHeight) {
+            console.log(`Mouse move in browser UI area at (${x}, ${y})`);
+            // Send to main window's web contents (browser UI)
+            await win.webContents.sendInputEvent({
+                type: 'mouseMove',
+                x: x,
+                y: y
+            });
+        } else {
+            console.log(`Mouse move in web content area at (${x}, ${y})`);
+            // Adjust coordinates for web content
+            const webContentX = x;
+            const webContentY = y - chromeHeight;
+
+            if (views[active] && views[active].webContents) {
+                await views[active].webContents.sendInputEvent({
+                    type: 'mouseMove',
+                    x: webContentX,
+                    y: webContentY
+                });
+            } else {
+                console.error('No active tab for web content mouse move');
+                return false;
+            }
+        }
+
+        console.log(`Mouse moved to coordinates (${x}, ${y})`);
+        return true;
+    } catch (error) {
+        console.error('Error moving mouse:', error);
+        return false;
+    }
+});
+
+ipcMain.handle('automation:getCursorPosition', async () => {
+    try {
+        const cursorPos = screen.getCursorScreenPoint();
+        const win = BrowserWindow.getFocusedWindow();
+        if (!win) return { x: 0, y: 0 };
+
+        const winBounds = win.getBounds();
+        // Convert global screen coordinates to window-relative coordinates
+        const relativeX = cursorPos.x - winBounds.x;
+        const relativeY = cursorPos.y - winBounds.y;
+
+        return { x: relativeX, y: relativeY };
+    } catch (error) {
+        console.error('Error getting cursor position:', error);
+        return { x: 0, y: 0 };
+    }
+});
+
+ipcMain.handle('automation:getChromeHeight', async () => {
+    const win = BrowserWindow.getFocusedWindow();
+    if (!win) return 88; // fallback
+
+    try {
+        // Ask the renderer for the actual chrome height
+        const chromeHeight = await win.webContents.executeJavaScript(`
+            (() => {
+                const tabbar = document.getElementById('tabbar');
+                const navbar = document.getElementById('navigation-bar');
+                const tabbarHeight = tabbar ? tabbar.offsetHeight : 0;
+                const navbarHeight = navbar ? navbar.offsetHeight : 0;
+                return tabbarHeight + navbarHeight;
+            })()
+        `);
+
+        console.log(`Calculated chrome height: ${chromeHeight}px`);
+        return chromeHeight || 88; // fallback to 88 if calculation fails
+    } catch (error) {
+        console.error('Error calculating chrome height:', error);
+        return 88; // fallback
+    }
+});
+
+ipcMain.handle('automation:getViewSize', async () => {
+    // Get the active view directly
+    if (!views[active]) {
+        return { width: 0, height: 0 };
+    }
+
+    try {
+        // Get the actual bounds that were set on the active view
+        const bounds = views[active].getBounds();
+
+        return {
+            width: bounds.width,
+            height: bounds.height,
+            x: bounds.x,
+            y: bounds.y
+        };
+    } catch (error) {
+        console.error('Error getting view size:', error);
+        return { width: 0, height: 0 };
     }
 });
